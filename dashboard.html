@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZeroCyber-SLM Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.2/dist/axios.min.js"></script>
+    <style>
+        :root { --primary: #1e40af; --danger: #dc2626; --success: #16a34a; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1e3a8a 0%, #1f2937 100%); color: #e5e7eb; }
+        .card { background: linear-gradient(135deg, #1f2937 0%, #111827 100%); border: 1px solid #374151; }
+        .stat-box { border-left: 4px solid var(--primary); }
+        .threat-critical { color: #fca5a5; }
+        .threat-high { color: #fdba74; }
+        .threat-medium { color: #fde047; }
+        .threat-low { color: #a7f3d0; }
+    </style>
+</head>
+<body class="p-6">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-4xl font-bold mb-2">🛡️ ZeroCyber-SLM</h1>
+            <p class="text-gray-400">Enterprise AI Cybersecurity Platform | Offline • Zero-Trust • Full Forensics</p>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="grid grid-cols-4 gap-4 mb-8">
+            <div class="card p-4 rounded-lg stat-box">
+                <p class="text-gray-400 text-sm">Total Threats</p>
+                <p id="total-threats" class="text-3xl font-bold">0</p>
+            </div>
+            <div class="card p-4 rounded-lg stat-box border-l-orange-500">
+                <p class="text-gray-400 text-sm">Critical</p>
+                <p id="critical-count" class="text-3xl font-bold threat-critical">0</p>
+            </div>
+            <div class="card p-4 rounded-lg stat-box border-l-green-500">
+                <p class="text-gray-400 text-sm">Blocked IPs</p>
+                <p id="blocked-ips" class="text-3xl font-bold">0</p>
+            </div>
+            <div class="card p-4 rounded-lg stat-box border-l-blue-500">
+                <p class="text-gray-400 text-sm">AI Model</p>
+                <p class="text-lg font-bold">ZeroCyber-SLM</p>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-3 gap-6 mb-8">
+            <!-- Recent Threats -->
+            <div class="col-span-2">
+                <div class="card p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4">Recent Threats</h2>
+                    <div id="threats-list" class="space-y-3 max-h-96 overflow-y-auto">
+                        <p class="text-gray-500 text-center">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attack Type Distribution -->
+            <div class="card p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Attack Types</h2>
+                <canvas id="attackTypesChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-2 gap-6 mb-8">
+            <div class="card p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Threat Timeline</h2>
+                <canvas id="timelineChart"></canvas>
+            </div>
+            <div class="card p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Classification Distribution</h2>
+                <canvas id="classificationChart"></canvas>
+            </div>
+        </div>
+
+        <!-- API Console -->
+        <div class="grid grid-cols-2 gap-6">
+            <div class="card p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">🔌 API Console</h2>
+                <textarea id="api-input" class="w-full h-32 bg-gray-900 border border-gray-700 p-3 rounded text-gray-300 font-mono text-sm mb-3" placeholder='{"payload": "SELECT * FROM users", "source_ip": "192.168.1.100"}'></textarea>
+                <button onclick="sendAnalysis()" class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-bold">Analyze</button>
+                <pre id="api-response" class="mt-4 bg-gray-900 p-3 rounded text-xs text-gray-300 max-h-48 overflow-y-auto"></pre>
+            </div>
+
+            <div class="card p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">📊 System Info</h2>
+                <div id="system-info" class="space-y-2 text-sm">
+                    <div class="flex justify-between"><span>API Version:</span> <span>v3.0</span></div>
+                    <div class="flex justify-between"><span>Detection Rules:</span> <span id="rules-count">-</span></div>
+                    <div class="flex justify-between"><span>MITRE Coverage:</span> <span id="mitre-coverage">-</span></div>
+                    <div class="flex justify-between"><span>Database:</span> <span>SQLite (Persistent)</span></div>
+                    <div class="flex justify-between"><span>Status:</span> <span class="text-green-400">● Online</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:5000/api/v3";
+        let threatsChart, classificationChart, attackTypeChart;
+
+        // Initialize dashboard
+        async function init() {
+            await loadStats();
+            await loadThreats();
+            setInterval(loadStats, 5000);
+            setInterval(loadThreats, 10000);
+        }
+
+        // Load statistics
+        async function loadStats() {
+            try {
+                const res = await axios.get(`${API_URL}/dashboard`);
+                const stats = res.data;
+
+                // Update counters
+                document.getElementById("total-threats").textContent = stats.threats.total_threats;
+                document.getElementById("critical-count").textContent = stats.threats.by_classification.CRITICAL || 0;
+                document.getElementById("blocked-ips").textContent = stats.blocked_ips;
+                document.getElementById("rules-count").textContent = stats.threats.by_type ? Object.keys(stats.threats.by_type).length : 0;
+
+                // Update charts
+                updateCharts(stats);
+            } catch (e) {
+                console.error("Failed to load stats:", e);
+            }
+        }
+
+        // Load recent threats
+        async function loadThreats() {
+            try {
+                const res = await axios.get(`${API_URL}/threats?limit=20`);
+                const threats = res.data.threats;
+                const html = threats.map(t => `
+                    <div class="bg-gray-800 p-3 rounded border-l-4 border-orange-500">
+                        <div class="flex justify-between">
+                            <strong class="${getSeverityClass(t.classification)}">${t.attack_type}</strong>
+                            <span class="text-xs text-gray-500">${new Date(t.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <p class="text-sm text-gray-400">From: ${t.source_ip} | Confidence: ${(t.confidence * 100).toFixed(0)}%</p>
+                        <p class="text-xs text-gray-500">Signature: ${t.signature}</p>
+                    </div>
+                `).join("");
+                document.getElementById("threats-list").innerHTML = html || "<p class='text-center text-gray-500'>No threats detected</p>";
+            } catch (e) {
+                console.error("Failed to load threats:", e);
+            }
+        }
+
+        // Send analysis
+        async function sendAnalysis() {
+            try {
+                const input = document.getElementById("api-input").value;
+                const data = JSON.parse(input);
+                const res = await axios.post(`${API_URL}/analyze`, data);
+                document.getElementById("api-response").textContent = JSON.stringify(res.data, null, 2);
+            } catch (e) {
+                document.getElementById("api-response").textContent = "❌ Error: " + e.message;
+            }
+        }
+
+        function getSeverityClass(cls) {
+            const classes = { CRITICAL: "threat-critical", HIGH: "threat-high", MEDIUM: "threat-medium", LOW: "threat-low" };
+            return classes[cls] || "text-gray-300";
+        }
+
+        function updateCharts(stats) {
+            // Classification pie chart
+            const classLabels = Object.keys(stats.threats.by_classification);
+            const classData = Object.values(stats.threats.by_classification);
+            if (classificationChart) classificationChart.destroy();
+            classificationChart = new Chart(document.getElementById("classificationChart"), {
+                type: "doughnut",
+                data: { labels: classLabels, datasets: [{ data: classData, backgroundColor: ["#dc2626", "#f97316", "#fde047", "#22c55e"] }] }
+            });
+
+            // Attack type pie chart
+            const typeLabels = Object.keys(stats.threats.by_type).slice(0, 5);
+            const typeData = Object.values(stats.threats.by_type).slice(0, 5);
+            if (attackTypeChart) attackTypeChart.destroy();
+            attackTypeChart = new Chart(document.getElementById("attackTypesChart"), {
+                type: "bar",
+                data: { labels: typeLabels, datasets: [{ label: "Count", data: typeData, backgroundColor: "#3b82f6" }] },
+                options: { indexAxis: "y" }
+            });
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>
